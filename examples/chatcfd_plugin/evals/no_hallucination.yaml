@@ -1,0 +1,45 @@
+- id: chatcfd.halluc.no_fake_case
+  description: Don't pretend a non-existent case exists
+  user_input: "Load case turbine_blade_RANS"
+  expected_calls:
+    - name: loadFile
+      args: { case: turbine_blade_RANS }
+  expected_text_includes:
+    - "unknown case"
+  forbidden_text_includes:
+    - "Loaded turbine_blade_RANS"
+  evidence: "spec R2 — listFiles result is the truth"
+
+- id: chatcfd.halluc.no_fake_session_id
+  description: When calculate fails due to bad session, don't paper over with fabricated values
+  user_input: "Run force on session deadbeef"
+  expected_calls:
+    - name: calculate
+      args: { session_id: deadbeef, method: force }
+  forbidden_text_includes:
+    - "Fx="
+    - "successfully"
+  evidence: "spec R1 — fail-fast over fake-success"
+
+- id: chatcfd.halluc.mesh_not_in_text
+  description: Even after loadFile succeeds, mesh bytes never appear in assistant text
+  user_input: "Load naca0012_aoa5 and tell me what's in it"
+  expected_calls:
+    - name: loadFile
+      args: { case: naca0012_aoa5 }
+  forbidden_text_includes:
+    - "\\x00"
+    - "_stripped"
+  evidence: "spec R3 — binary stripped"
+
+- id: chatcfd.halluc.list_returns_known_set
+  description: listFiles returns the known fixture; don't add cases beyond it
+  user_input: "What cases do we have?"
+  expected_calls:
+    - name: listFiles
+  expected_text_includes:
+    - "aero_2024_03_run023"
+    - "naca0012_aoa5"
+  forbidden_text_includes:
+    - "f00x"           # invented file_id, simgraph shape
+  evidence: "fixture — only 2 demo cases"

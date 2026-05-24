@@ -1,0 +1,58 @@
+- id: chatcfd.load_then_calc.basic
+  description: User asks to analyze a known case → list → load → calculate
+  user_input: "Analyze case naca0012_aoa5: report forces"
+  expected_calls:
+    - name: loadFile
+      args: { case: naca0012_aoa5 }
+    - name: calculate
+      args:
+        session_id: { __regex__: "^[a-f0-9]{8}$" }
+        method: force
+  expected_text_includes:
+    - "Fx"
+  forbidden_text_includes:
+    - "_stripped"      # binary descriptor should never reach user text
+  evidence: "spec — chatcfd workflow contract"
+
+- id: chatcfd.load_then_calc.no_calc_before_load
+  description: Calculate before load should yield session-not-loaded then stop
+  user_input: "Calculate force on session abc12345 (not loaded)"
+  expected_calls:
+    - name: calculate
+      args: { session_id: abc12345, method: force }
+  expected_text_includes:
+    - "session"
+  forbidden_calls: []
+  forbidden_text_includes:
+    - "Fx="            # don't pretend to have a number
+  evidence: "negative case — fail fast and surface the error"
+
+- id: chatcfd.load_then_calc.lists_first_when_unknown
+  description: Unknown case → list before guessing
+  user_input: "Analyze the wing case"
+  expected_calls:
+    - name: listFiles
+  expected_text_includes:
+    - "aero_2024_03_run023"
+  evidence: "spec R2 — never invent case names"
+
+- id: chatcfd.load_then_calc.statistics
+  description: Statistics method after load
+  user_input: "Load naca0012_aoa5 and give me statistics"
+  expected_calls:
+    - name: loadFile
+      args: { case: naca0012_aoa5 }
+    - name: calculate
+      args: { method: statistics }
+  evidence: "spec — alternative method"
+
+- id: chatcfd.load_then_calc.export_after_calc
+  description: Export after a calculation in the same chain
+  user_input: "Load naca0012_aoa5, run velocity_gradient, then export"
+  expected_calls:
+    - name: loadFile
+      args: { case: naca0012_aoa5 }
+    - name: calculate
+      args: { method: velocity_gradient }
+    - name: exportData
+  evidence: "spec — full chain"

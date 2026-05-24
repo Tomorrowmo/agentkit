@@ -1,0 +1,32 @@
+- id: simgraph.ingest.basic
+  description: New path is queued
+  user_input: "入库 /shared/new/case_v9/"
+  expected_calls:
+    - name: ingest_file
+      args: { path: "/shared/new/case_v9/" }
+  expected_text_includes:
+    - "queued"
+  evidence: "spec — new path triggers queue"
+
+- id: simgraph.ingest.dedup_same_path
+  description: Same path twice = same file_id, second call says 'already ingested'
+  user_input: "入库 /shared/dup/case/"
+  expected_calls:
+    - name: ingest_file
+      args: { path: "/shared/dup/case/" }
+    - name: ingest_file
+      args: { path: "/shared/dup/case/" }
+  expected_text_includes:
+    - "already"
+  forbidden_text_includes:
+    - "two file_id"
+  evidence: "simgraph spec — file_path dedup"
+
+- id: simgraph.ingest.extract_after_ingest
+  description: extract_metadata should be callable on a newly-ingested file
+  user_input: "ingest /shared/extract/case/ then extract metadata"
+  expected_calls:
+    - name: ingest_file
+      args: { path: "/shared/extract/case/" }
+    - name: extract_metadata
+  evidence: "workflow — ingest → extract"

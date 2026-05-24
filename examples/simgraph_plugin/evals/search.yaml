@@ -1,0 +1,54 @@
+- id: simgraph.search.zhang_wei_converged
+  description: Filter by owner + convergence
+  user_input: "找张伟做的已收敛算例"
+  expected_calls:
+    - name: query_graph
+      args:
+        question: { __contains__: "张伟" }
+  expected_text_includes:
+    - "f001"
+  forbidden_text_includes:
+    - "f00x"        # no invented file_ids
+  evidence: "fixture — 2 results expected (f001, f002 excluded as not converged)"
+
+- id: simgraph.search.empty_returns_card_truthfully
+  description: Zero hits should be reported as such, not faked
+  user_input: "找张伟做的 Ma9999 算例"
+  expected_calls:
+    - name: query_graph
+  expected_text_includes:
+    - "0"
+  forbidden_text_includes:
+    - "f001"        # no real file_id should be invented as match
+  evidence: "spec R1 — no fake results"
+
+- id: simgraph.search.pin_then_card
+  description: After search, fetching a card uses the SAME file_id from results
+  user_input: "查 f003 这个算例的详细卡片"
+  expected_calls:
+    - name: get_card
+      args: { file_id: f003 }
+  expected_text_includes:
+    - "李雯"        # owner from fixture
+  evidence: "spec — explicit file_id is honored"
+
+- id: simgraph.search.stable_count
+  description: Asking "how many" should give the fixture count (3 in this demo)
+  user_input: "图谱里一共有几个算例？"
+  expected_calls:
+    - name: query_graph
+  expected_text_includes:
+    - "3"
+  evidence: "spec R2 — count stability"
+
+- id: simgraph.search.unknown_file_id_errors
+  description: Asking for a file_id not in the graph returns an error, not invention
+  user_input: "Show me card f999"
+  expected_calls:
+    - name: get_card
+      args: { file_id: f999 }
+  expected_text_includes:
+    - "unknown"
+  forbidden_text_includes:
+    - "owner"
+  evidence: "spec R1 — error transparency"

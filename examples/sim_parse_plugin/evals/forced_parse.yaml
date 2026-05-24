@@ -1,0 +1,25 @@
+- id: sim_parse.force.user_overrides
+  description: When user says "force OpenFOAM", call parse_openfoam directly
+  setup:
+    path: "/tmp/openfoam_case/"
+  user_input: "Force parse /tmp/openfoam_case/ as OpenFOAM"
+  expected_calls:
+    - name: parse_openfoam
+      args: { path: { __contains__: "openfoam_case" } }
+  forbidden_calls:
+    - auto_parse
+  evidence: "skill — explicit override"
+
+- id: sim_parse.force.fluent_on_nonfluent_errors
+  description: Forcing Fluent on a non-Fluent path returns an error, not a fabrication
+  setup:
+    path: "/tmp/random.dat"
+  user_input: "parse_fluent /tmp/random.dat"
+  expected_calls:
+    - name: parse_fluent
+      args: { path: { __contains__: "random.dat" } }
+  expected_text_includes:
+    - "does not recognize"
+  forbidden_text_includes:
+    - "solver_type"            # don't dump metadata after an error
+  evidence: "spec — honest forced-failure"

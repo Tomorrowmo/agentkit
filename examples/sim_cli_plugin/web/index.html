@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>sim_cli — simgraph CLI driver</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root { color-scheme: light dark; }
+    body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+            display: flex; flex-direction: column; height: 100vh; }
+    header { padding: 12px 16px; background: #1e293b; color: #f8fafc;
+             display: flex; justify-content: space-between; align-items: baseline; }
+    header h1 { font-size: 16px; margin: 0; }
+    header small { opacity: 0.7; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    main { flex: 1; display: grid; grid-template-columns: 1fr 360px; min-height: 0; }
+    #chat { overflow-y: auto; padding: 16px; }
+    aside { overflow-y: auto; padding: 12px 16px; background: #f1f5f9; border-left: 1px solid #cbd5e1; font-size: 13px; }
+    aside h2 { font-size: 13px; margin: 4px 0 8px; text-transform: uppercase; letter-spacing: .04em; color: #475569; }
+    .msg { margin: 8px 0; padding: 10px 12px; border-radius: 10px; max-width: 80%; white-space: pre-wrap; line-height: 1.45; }
+    .user { background: #2563eb; color: white; margin-left: auto; }
+    .asst { background: #e2e8f0; color: #0f172a; }
+    .tool { background: #fef3c7; color: #78350f; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 12px; padding: 6px 10px; border-radius: 6px; max-width: 80%; }
+    .err  { background: #fee2e2; color: #7f1d1d; }
+    .artifact { border: 1px dashed #94a3b8; padding: 8px 10px; margin: 6px 0; border-radius: 6px;
+                 font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: white; }
+    footer { padding: 10px; border-top: 1px solid #cbd5e1; display: flex; gap: 8px; }
+    #input { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid #94a3b8; font-size: 14px; }
+    button { padding: 10px 16px; border: none; background: #2563eb; color: white; border-radius: 8px; cursor: pointer; }
+    button:disabled { background: #94a3b8; }
+    .tool-pill { display: inline-block; padding: 2px 6px; margin: 2px; border-radius: 4px; background: #cbd5e1;
+                  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #0f172a; color: #e2e8f0; }
+      aside { background: #1e293b; border-color: #334155; color: #cbd5e1; }
+      .asst { background: #334155; color: #f1f5f9; }
+      .artifact { background: #1e293b; }
+      footer { border-color: #334155; }
+      #input { background: #0f172a; color: #e2e8f0; border-color: #475569; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>sim_cli — simgraph CLI driver</h1>
+    <small id="status">connecting…</small>
+  </header>
+  <main>
+    <div id="chat"></div>
+    <aside>
+      <h2>Tools</h2>
+      <div id="tools"></div>
+      <h2 style="margin-top:14px">Recent events</h2>
+      <div id="events" style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;"></div>
+    </aside>
+  </main>
+  <footer>
+    <input id="input" placeholder="Ask…" autofocus />
+    <button id="send">Send</button>
+    <button id="cancel">Cancel</button>
+  </footer>
+
+  <script>
+    const wsUrl = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/agent";
+    const chat = document.getElementById("chat");
+    const events = document.getElementById("events");
+    const status = document.getElementById("status");
+    const input = document.getElementById("input");
+    const sendBtn = document.getElementById("send");
+    const cancelBtn = document.getElementById("cancel");
+
+    let ws, threadId = null, currentAsst = null;
+
+    function addMsg(cls, text) {
+      const d = document.createElement("div");
+      d.className = "msg " + cls;
+      d.textContent = text;
+      chat.appendChild(d);
+      chat.scrollTop = chat.scrollHeight;
+      return d;
+    }
+    function addArtifact(a) {
+      const d = document.createElement("div");
+      d.className = "artifact";
+      d.textContent = "[" + (a.kind || "artifact") + "] " + (a.payload?.title || "");
+      const pre = document.createElement("pre");
+      pre.style.fontSize = "11px";
+      pre.style.margin = "4px 0 0";
+      pre.style.whiteSpace = "pre-wrap";
+      pre.textContent = JSON.stringify(a.payload || a, null, 2);
+      d.appendChild(pre);
+      chat.appendChild(d);
+      chat.scrollTop = chat.scrollHeight;
+    }
+    function logEvent(s) {
+      const d = document.createElement("div");
+      d.textContent = s;
+      events.prepend(d);
+      while (events.children.length > 40) events.removeChild(events.lastChild);
+    }
+
+    fetch("/api/tools").then(r => r.json()).then(list => {
+      const cont = document.getElementById("tools");
+      list.forEach(t => {
+        const s = document.createElement("span");
+        s.className = "tool-pill";
+        s.title = t.description;
+        s.textContent = t.name;
+        cont.appendChild(s);
+      });
+    }).catch(() => {});
+
+    function connect() {
+      ws = new WebSocket(wsUrl);
+      ws.onopen = () => { status.textContent = "connected"; };
+      ws.onclose = () => { status.textContent = "disconnected"; setTimeout(connect, 1500); };
+      ws.onerror = () => { status.textContent = "error"; };
+      ws.onmessage = e => {
+        const evt = JSON.parse(e.data);
+        logEvent(evt.type);
+        if (evt.type === "thread_started") { threadId = evt.thread_id; status.textContent = "thread " + threadId.slice(0,8); }
+        else if (evt.type === "assistant_text") {
+          if (!currentAsst) currentAsst = addMsg("asst", "");
+          currentAsst.textContent += evt.delta;
+          chat.scrollTop = chat.scrollHeight;
+        }
+        else if (evt.type === "tool_call") {
+          addMsg("tool", "→ " + evt.name + "(" + JSON.stringify(evt.arguments) + ")");
+        }
+        else if (evt.type === "tool_result") {
+          if (evt.error) addMsg("tool err", "← " + evt.name + " error: " + evt.error);
+          else addMsg("tool", "← " + evt.name + ": " + JSON.stringify(evt.result).slice(0, 200));
+        }
+        else if (evt.type === "artifact") { addArtifact(evt); }
+        else if (evt.type === "error") { addMsg("err", "[error] " + evt.message); }
+        else if (evt.type === "turn_finished") { currentAsst = null; sendBtn.disabled = false; }
+      };
+    }
+    connect();
+
+    function send() {
+      const text = input.value.trim();
+      if (!text || ws.readyState !== 1) return;
+      addMsg("user", text);
+      ws.send(JSON.stringify({ type: "user_message", content: text, thread_id: threadId }));
+      input.value = "";
+      sendBtn.disabled = true;
+    }
+    sendBtn.onclick = send;
+    input.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
+    cancelBtn.onclick = () => {
+      if (ws.readyState === 1 && threadId) ws.send(JSON.stringify({ type: "cancel", thread_id: threadId }));
+    };
+  </script>
+</body>
+</html>

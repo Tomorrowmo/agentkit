@@ -1,0 +1,41 @@
+- id: sim_cli.status.before_start
+  description: Check status before starting collector
+  user_input: "Is the collector running? If not start it."
+  expected_calls:
+    - name: cli_status
+    - name: start_collector
+  expected_text_includes:
+    - "collector"
+  evidence: "skill — cli_status first"
+
+- id: sim_cli.status.no_duplicate_start
+  description: Don't restart something already running
+  setup:
+    pre_running: ["collector"]
+  user_input: "Start the collector"
+  expected_calls:
+    - name: cli_status
+  forbidden_calls:
+    - start_collector
+  expected_text_includes:
+    - "already"
+  evidence: "skill — idempotent start"
+
+- id: sim_cli.status.start_all
+  description: Bring everything up in the documented order
+  user_input: "Start all simgraph services"
+  expected_calls:
+    - name: start_post_service
+    - name: start_collector
+    - name: start_mcp
+  loose_order: false
+  evidence: "skill — start order matters"
+
+- id: sim_cli.status.version_check
+  description: Reports CLI version without inventing it
+  user_input: "What simgraph version is installed?"
+  expected_calls:
+    - name: cli_version
+  expected_text_includes:
+    - "1.0.0"
+  evidence: "spec — version is from cli, never guessed"

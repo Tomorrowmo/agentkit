@@ -77,6 +77,8 @@ class App:
         tool_result_preview: int = DEFAULT_TOOL_RESULT_PREVIEW,
         stream_llm: bool = True,
         compactor: Compactor | None = None,
+        web_root: str | None = None,
+        web_title: str = "agentkit",
     ):
         self.registry = _coerce_registry(tools)
         self.mcp_configs = _coerce_mcp(mcp_servers)
@@ -95,6 +97,8 @@ class App:
         self.stream_llm = stream_llm
         self.compactor = compactor
         self._turns: dict[str, TurnContext] = {}
+        self.web_root = web_root
+        self.web_title = web_title
 
     @property
     def context(self) -> AppContext:

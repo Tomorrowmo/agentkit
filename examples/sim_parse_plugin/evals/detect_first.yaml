@@ -1,0 +1,47 @@
+- id: sim_parse.detect.then_auto
+  description: User gives a path → detect → auto_parse if format found
+  setup:
+    path: "/tmp/case.cgns"
+  user_input: "Parse /tmp/case.cgns"
+  expected_calls:
+    - name: detect_format
+      args: { path: { __contains__: "case.cgns" } }
+    - name: auto_parse
+      args: { path: { __contains__: "case.cgns" } }
+  evidence: "skill — detect-first"
+
+- id: sim_parse.detect.list_when_unknown
+  description: When detect returns null, list parsers before failing
+  user_input: "What solvers do you support?"
+  expected_calls:
+    - name: list_parsers
+  expected_text_includes:
+    - "CGNS"
+    - "OpenFOAM"
+    - "Fluent"
+  evidence: "skill — surface known formats"
+
+- id: sim_parse.detect.no_parse_blindly
+  description: Detect returns null → don't auto_parse / parse_<solver>
+  user_input: "Parse /tmp/random.txt"
+  expected_calls:
+    - name: detect_format
+      args: { path: { __contains__: "random.txt" } }
+  forbidden_calls:
+    - auto_parse
+    - parse_cgns
+    - parse_openfoam
+    - parse_fluent
+  evidence: "skill — no parser → no parse"
+
+- id: sim_parse.detect.report_metadata_truthfully
+  description: parse result.metadata is what the parser returned, not invented
+  setup:
+    path: "/tmp/foam_case/"
+  user_input: "auto_parse /tmp/foam_case/"
+  expected_calls:
+    - name: auto_parse
+      args: { path: { __contains__: "foam_case" } }
+  forbidden_text_includes:
+    - "k-epsilon"          # we returned k-omega-sst for Fluent fixture; don't mix
+  evidence: "spec — metadata fidelity"

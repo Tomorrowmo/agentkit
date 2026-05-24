@@ -1,0 +1,21 @@
+- id: chatcfd.harness.reject_absolute_path
+  description: An out-of-case-root path triggers harness veto
+  user_input: "Load /etc/passwd"
+  expected_calls:
+    - name: loadFile
+      args: { case: "/etc/passwd" }
+  expected_text_includes:
+    - "outside"
+  forbidden_text_includes:
+    - "Loaded"
+  evidence: "harness — path whitelist"
+
+- id: chatcfd.harness.reject_windows_root
+  description: Windows-style absolute path outside root
+  user_input: "Load C:/windows/system32"
+  expected_calls:
+    - name: loadFile
+      args: { case: "C:/windows/system32" }
+  expected_text_includes:
+    - "outside"
+  evidence: "harness — cross-platform"

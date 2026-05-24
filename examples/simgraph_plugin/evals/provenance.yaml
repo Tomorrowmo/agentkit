@@ -1,0 +1,31 @@
+- id: simgraph.prov.f001
+  description: Provenance for a known file with upstream
+  user_input: "f001 的输入文件谱系"
+  expected_calls:
+    - name: trace_provenance
+      args: { file_id: f001 }
+  expected_text_includes:
+    - "mesh_v3"
+  evidence: "fixture — f001 has mesh_v3 + setup_doc_v2"
+
+- id: simgraph.prov.f003
+  description: f003 has mesh_v4 only
+  user_input: "trace_provenance f003"
+  expected_calls:
+    - name: trace_provenance
+      args: { file_id: f003 }
+  expected_text_includes:
+    - "mesh_v4"
+  forbidden_text_includes:
+    - "mesh_v3"     # don't bleed from f001
+  evidence: "fixture — isolation between files"
+
+- id: simgraph.prov.find_similar
+  description: find_similar(f001) → f002 is top because same project + close Ma
+  user_input: "找跟 f001 相似的算例 top 2"
+  expected_calls:
+    - name: find_similar
+      args: { file_id: f001, k: 2 }
+  expected_text_includes:
+    - "f002"
+  evidence: "fixture — same XX-1 project, Ma 6.0 vs 6.2"

@@ -1,19 +1,19 @@
-"""simgraph reference host — assembles agentkit App from simgraph_plugin."""
+"""Run simgraph YAML eval set in scripted-LLM mode."""
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
 
+import pytest
+
 from agentkit import App
+from agentkit.eval import EvalRunner, ScriptedLLM, load_cases
+from agentkit.eval.scripted_llm import script_from_case_expected
 from agentkit.harness.base import Harness
-from agentkit.llm.client import LLMClient
-from agentkit.runtime import write_chat_ui
-from agentkit.session.compact import Compactor
 from agentkit.skills.loader import SkillLoader
 from agentkit.tools.registry import ToolRegistry
 
@@ -25,27 +25,22 @@ from simgraph_plugin import (
 )
 
 
-def build_app() -> App:
-    web_dir = HERE / "web"
-    write_chat_ui(web_dir, title="simgraph — simulation index agent")
+def make_app(script):
     skills = SkillLoader(HERE / "simgraph_plugin" / "skills").discover()
-    llm = LLMClient(model=os.environ.get("AGENTKIT_MODEL", "gpt-4o-mini"))
     return App(
         tools=ToolRegistry(SIMGRAPH_TOOLS),
-        llm=llm,
+        llm=ScriptedLLM(script),
         harness=Harness([simgraph_harness_hook]),
         prompt_builder=SimGraphPromptBuilder(skills=skills),
         artifact_factory=SimGraphArtifactFactory(),
-        compactor=Compactor(llm),
-        insight_log_path="./logs/simgraph.jsonl",
-        web_root=str(web_dir),
-        web_title="simgraph",
     )
 
 
-def main() -> None:
-    build_app().run(host="127.0.0.1", port=8766)
+CASES = load_cases(HERE / "evals")
 
 
-if __name__ == "__main__":
-    main()
+@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
+async def test_case(case):
+    script = script_from_case_expected(case)
+    res = await EvalRunner(make_app(script)).run(case)
+    assert res.passed, "\n".join(res.reasons) + f"\n  observed: {[o.name for o in res.observed_calls]}\n  text: {res.observed_text!r}"

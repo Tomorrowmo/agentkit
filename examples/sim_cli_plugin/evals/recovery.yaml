@@ -1,0 +1,21 @@
+- id: sim_cli.recovery.restart_after_crash
+  description: Stop dead service then start it
+  user_input: "post_service is unresponsive. Restart it."
+  expected_calls:
+    - name: cli_status
+    - name: stop_process
+      args: { name: post_service }
+    - name: start_post_service
+  evidence: "skill — proper restart sequence"
+
+- id: sim_cli.recovery.stop_unknown_returns_error
+  description: Don't pretend to stop something that isn't running
+  user_input: "Stop the mcp service"
+  expected_calls:
+    - name: stop_process
+      args: { name: mcp }
+  expected_text_includes:
+    - "no tracked process"
+  forbidden_text_includes:
+    - "stopped mcp"
+  evidence: "spec — honest error"

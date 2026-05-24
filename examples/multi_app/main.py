@@ -26,6 +26,7 @@ from agentkit.harness.base import Harness
 from agentkit.llm.client import LLMClient
 from agentkit.plugin.artifact_factory import ArtifactFactory
 from agentkit.plugin.prompt_builder import PromptBuilder
+from agentkit.runtime import write_chat_ui
 from agentkit.session.compact import Compactor
 from agentkit.skills.loader import SkillLoader
 from agentkit.tools.registry import ToolRegistry
@@ -71,6 +72,8 @@ class UnionArtifactFactory(ArtifactFactory):
 
 
 def build_app() -> App:
+    web_dir = HERE / "web"
+    write_chat_ui(web_dir, title="multi_app — chatcfd + simgraph")
     cfd_skills = SkillLoader(CHATCFD_PLUGIN / "chatcfd_plugin" / "skills").discover()
     sg_skills = SkillLoader(SIMGRAPH_PLUGIN / "simgraph_plugin" / "skills").discover()
     llm = LLMClient(model=os.environ.get("AGENTKIT_MODEL", "gpt-4o-mini"))
@@ -95,6 +98,8 @@ def build_app() -> App:
         context_hooks=[CFDMemoryHook()],
         compactor=Compactor(llm),
         insight_log_path="./logs/multi.jsonl",
+        web_root=str(web_dir),
+        web_title="multi_app",
     )
 
 
