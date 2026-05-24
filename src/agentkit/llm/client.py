@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Sequence
+from typing import Any, AsyncIterator, Awaitable, Callable, Sequence
 
 from agentkit.protocol.messages import (
     AssistantMessage,
@@ -128,6 +128,68 @@ class LLMClient:
 
         async for chunk in await litellm.acompletion(**kwargs):
             yield chunk if isinstance(chunk, dict) else chunk.model_dump()
+
+    async def complete_streaming(
+        self,
+        messages: Sequence[Message],
+        on_text_delta: Callable[[str], Awaitable[None] | None],
+        tools: Sequence[ToolSpec] | None = None,
+    ) -> LLMResponse:
+        """Stream text to a callback, accumulate tool_calls, return final response.
+
+        Tool calls in OpenAI/LiteLLM streaming arrive in fragments: index +
+        partial arguments string. We reassemble them and emit the structured
+        AssistantMessage at the end so the App.turn() loop sees the same
+        shape as `complete()`.
+        """
+        text_parts: list[str] = []
+        tool_state: dict[int, dict[str, Any]] = {}
+        finish_reason: str | None = None
+
+        async for chunk in self.stream(messages, tools=tools):
+            choices = chunk.get("choices") or []
+            if not choices:
+                continue
+            delta = choices[0].get("delta") or {}
+            if (text := delta.get("content")):
+                text_parts.append(text)
+                ret = on_text_delta(text)
+                if hasattr(ret, "__await__"):
+                    await ret
+            for tc in delta.get("tool_calls") or []:
+                idx = tc.get("index", 0)
+                slot = tool_state.setdefault(
+                    idx, {"id": "", "name": "", "arguments": ""}
+                )
+                if tc.get("id"):
+                    slot["id"] = tc["id"]
+                fn = tc.get("function") or {}
+                if fn.get("name"):
+                    slot["name"] = fn["name"]
+                if fn.get("arguments"):
+                    slot["arguments"] += fn["arguments"]
+            if choices[0].get("finish_reason"):
+                finish_reason = choices[0]["finish_reason"]
+
+        tool_calls: list[ToolCall] = []
+        for idx in sorted(tool_state):
+            slot = tool_state[idx]
+            args_raw = slot["arguments"] or "{}"
+            try:
+                args = json.loads(args_raw)
+            except json.JSONDecodeError:
+                args = {"_raw": args_raw}
+            tool_calls.append(
+                ToolCall(id=slot["id"], name=slot["name"], arguments=args)
+            )
+
+        return LLMResponse(
+            message=AssistantMessage(
+                content="".join(text_parts) or None,
+                tool_calls=tool_calls,
+            ),
+            finish_reason=finish_reason,
+        )
 
     @staticmethod
     def _parse(resp: Any) -> LLMResponse:

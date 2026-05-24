@@ -43,7 +43,8 @@ from agentkit.session.turn import TurnContext
 from agentkit.tools.registry import ToolRegistry
 from agentkit.tools.router import ToolRouter
 
-MAX_TOOL_ROUNDS = 10
+DEFAULT_MAX_TOOL_ROUNDS = 10
+DEFAULT_TOOL_RESULT_PREVIEW = 2000
 
 
 @dataclass
@@ -71,6 +72,9 @@ class App:
         artifact_factory: ArtifactFactory | None = None,
         context_hooks: Iterable[ContextHook] | None = None,
         insight_log_path: str | None = None,
+        max_tool_rounds: int = DEFAULT_MAX_TOOL_ROUNDS,
+        tool_result_preview: int = DEFAULT_TOOL_RESULT_PREVIEW,
+        stream_llm: bool = True,
     ):
         self.registry = _coerce_registry(tools)
         self.mcp_configs = _coerce_mcp(mcp_servers)
@@ -84,6 +88,9 @@ class App:
         self.threads = ThreadPool()
         self.router = ToolRouter(self.registry, self.harness, self.tracer)
         self._mcp_pool: MCPPool | None = None
+        self.max_tool_rounds = max_tool_rounds
+        self.tool_result_preview = tool_result_preview
+        self.stream_llm = stream_llm
 
     @property
     def context(self) -> AppContext:
@@ -121,20 +128,44 @@ class App:
         ctx = TurnContext(thread=thread)
         specs = self.registry.specs(exposure=ToolExposure.DIRECT)
 
-        for round_idx in range(MAX_TOOL_ROUNDS):
+        for round_idx in range(self.max_tool_rounds):
             if ctx.cancelled:
                 break
 
             try:
-                resp = await self.llm.complete(thread.messages, tools=specs)
+                if self.stream_llm:
+                    delta_queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+                    async def _on_delta(text: str) -> None:
+                        await delta_queue.put(text)
+
+                    llm_task = asyncio.create_task(
+                        self.llm.complete_streaming(thread.messages, _on_delta, tools=specs)
+                    )
+
+                    async def _drain() -> None:
+                        try:
+                            await llm_task
+                        finally:
+                            await delta_queue.put(None)
+
+                    drain_task = asyncio.create_task(_drain())
+                    while True:
+                        text = await delta_queue.get()
+                        if text is None:
+                            break
+                        yield AssistantTextEvent(delta=text)
+                    await drain_task
+                    resp = llm_task.result()
+                else:
+                    resp = await self.llm.complete(thread.messages, tools=specs)
+                    if resp.message.content:
+                        yield AssistantTextEvent(delta=resp.message.content)
             except Exception as exc:  # noqa: BLE001
                 yield ErrorEvent(message=f"llm error: {exc}")
                 break
 
             thread.add_assistant(resp.message)
-
-            if resp.message.content:
-                yield AssistantTextEvent(delta=resp.message.content)
 
             if not resp.message.tool_calls:
                 break
@@ -145,8 +176,11 @@ class App:
                 )
                 try:
                     result = await self.router.dispatch(call)
+                    llm_view = _strip_binary(result)
                     yield ToolResultEvent(
-                        call_id=call.id, name=call.name, result=_summarize(result)
+                        call_id=call.id,
+                        name=call.name,
+                        result=_summarize(llm_view, self.tool_result_preview),
                     )
                     self._maybe_log("tool_result", call=call.name, ok=True)
                     artifact = self.artifact_factory.make(call.name, call.arguments, result)
@@ -154,15 +188,17 @@ class App:
                         yield ArtifactEvent(
                             kind=str(artifact.get("kind", "generic")), payload=artifact
                         )
-                    thread.add_tool_result(call.id, call.name, _to_text(result))
+                    thread.add_tool_result(call.id, call.name, _to_text(llm_view))
                 except (ToolError, ToolNotFound, HarnessRejected) as exc:
                     err = str(exc)
                     yield ToolResultEvent(call_id=call.id, name=call.name, error=err)
                     self._maybe_log("tool_result", call=call.name, ok=False, error=err)
                     thread.add_tool_result(call.id, call.name, json.dumps({"error": err}))
 
-            if round_idx == MAX_TOOL_ROUNDS - 1:
-                yield ErrorEvent(message=f"max tool rounds ({MAX_TOOL_ROUNDS}) exceeded")
+            if round_idx == self.max_tool_rounds - 1:
+                yield ErrorEvent(
+                    message=f"max tool rounds ({self.max_tool_rounds}) exceeded"
+                )
 
         for hook in self.context_hooks:
             await hook.after_turn(thread)
@@ -224,7 +260,39 @@ def _coerce_mcp(
     return out
 
 
-def _summarize(result: Any, max_len: int = 2000) -> Any:
+BINARY_KEYS = ("data", "mesh", "blob", "bytes")
+
+
+def _strip_binary(result: Any) -> Any:
+    """Remove large binary payloads from a tool result before showing the LLM.
+
+    Convention: tools that return mesh/blobs put them under a key named
+    `data` / `mesh` / `blob` / `bytes`, and a sibling `summary` describes
+    what was produced. The full object still reaches ArtifactFactory.
+    """
+    if not isinstance(result, dict):
+        return result
+    if "summary" not in result:
+        return result
+    out: dict[str, Any] = {}
+    for k, v in result.items():
+        if k in BINARY_KEYS:
+            kind = type(v).__name__
+            size = _approx_size(v)
+            out[k] = {"_stripped": True, "kind": kind, "approx_size": size}
+        else:
+            out[k] = v
+    return out
+
+
+def _approx_size(v: Any) -> int:
+    try:
+        return len(v)  # works for bytes, list, dict, str
+    except TypeError:
+        return -1
+
+
+def _summarize(result: Any, max_len: int) -> Any:
     text = _to_text(result)
     if len(text) <= max_len:
         return result
