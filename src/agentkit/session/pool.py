@@ -24,6 +24,10 @@ class ThreadPool:
     def get(self, thread_id: str) -> Thread | None:
         return self._threads.get(thread_id)
 
+    def register(self, thread: Thread) -> None:
+        """Insert an externally-built thread (e.g. result of fork())."""
+        self._threads[thread.id] = thread
+
     def get_or_create(self, thread_id: str | None, system_prompt: str | None = None) -> Thread:
         if thread_id and thread_id in self._threads:
             return self._threads[thread_id]

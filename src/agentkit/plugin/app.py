@@ -37,6 +37,7 @@ from agentkit.protocol.events import (
     TurnFinishedEvent,
 )
 from agentkit.protocol.tool_spec import ToolExposure
+from agentkit.session.compact import Compactor
 from agentkit.session.pool import ThreadPool
 from agentkit.session.thread import Thread
 from agentkit.session.turn import TurnContext
@@ -75,6 +76,7 @@ class App:
         max_tool_rounds: int = DEFAULT_MAX_TOOL_ROUNDS,
         tool_result_preview: int = DEFAULT_TOOL_RESULT_PREVIEW,
         stream_llm: bool = True,
+        compactor: Compactor | None = None,
     ):
         self.registry = _coerce_registry(tools)
         self.mcp_configs = _coerce_mcp(mcp_servers)
@@ -91,6 +93,8 @@ class App:
         self.max_tool_rounds = max_tool_rounds
         self.tool_result_preview = tool_result_preview
         self.stream_llm = stream_llm
+        self.compactor = compactor
+        self._turns: dict[str, TurnContext] = {}
 
     @property
     def context(self) -> AppContext:
@@ -125,7 +129,13 @@ class App:
         thread.set_system(self.prompt_builder.build(thread))
         thread.add_user(user_message)
 
+        if self.compactor is not None:
+            compacted = await self.compactor.maybe_compact(thread)
+            if compacted:
+                self._maybe_log("compacted", thread_id=thread.id)
+
         ctx = TurnContext(thread=thread)
+        self._turns[thread.id] = ctx
         specs = self.registry.specs(exposure=ToolExposure.DIRECT)
 
         for round_idx in range(self.max_tool_rounds):
@@ -171,6 +181,9 @@ class App:
                 break
 
             for call in resp.message.tool_calls:
+                if ctx.cancelled:
+                    yield ErrorEvent(message="cancelled by user")
+                    break
                 yield ToolCallEvent(
                     call_id=call.id, name=call.name, arguments=call.arguments
                 )
@@ -203,7 +216,15 @@ class App:
         for hook in self.context_hooks:
             await hook.after_turn(thread)
 
+        self._turns.pop(thread.id, None)
         yield TurnFinishedEvent(thread_id=thread.id)
+
+    def cancel_turn(self, thread_id: str) -> bool:
+        ctx = self._turns.get(thread_id)
+        if ctx is None:
+            return False
+        ctx.cancel()
+        return True
 
     def open_thread(self, thread_id: str | None = None) -> Thread:
         return self.threads.get_or_create(thread_id)
