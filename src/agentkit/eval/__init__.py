@@ -9,18 +9,27 @@ This is the agent-process-management layer. It lets you:
 """
 
 from agentkit.eval.case import EvalCase, ExpectedCall, MatcherDict, load_cases
+from agentkit.eval.live import EvalMode, resolve_mode, run_cases
 from agentkit.eval.runner import CaseResult, EvalRunner
 from agentkit.eval.scorecard import Scorecard
 from agentkit.eval.scripted_llm import ScriptedLLM, ScriptedTurn
+from agentkit.eval.setup import DEFAULT_REGISTRY, SetupHook, SetupRegistry, setup_hook
 
 __all__ = [
     "CaseResult",
+    "DEFAULT_REGISTRY",
     "EvalCase",
+    "EvalMode",
     "EvalRunner",
     "ExpectedCall",
     "MatcherDict",
     "Scorecard",
     "ScriptedLLM",
     "ScriptedTurn",
+    "SetupHook",
+    "SetupRegistry",
     "load_cases",
+    "resolve_mode",
+    "run_cases",
+    "setup_hook",
 ]

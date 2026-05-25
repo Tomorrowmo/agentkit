@@ -1,4 +1,8 @@
-"""Run sim_cli YAML eval set in scripted-LLM mode."""
+"""Run sim_cli YAML eval set in scripted-LLM mode.
+
+Setup state (e.g. `pre_running: [collector]`) is applied by the
+framework via setup hooks registered in sim_cli_plugin/eval_setup.py.
+"""
 
 from __future__ import annotations
 
@@ -21,9 +25,9 @@ from sim_cli_plugin import (
     SIM_CLI_TOOLS,
     SimCliArtifactFactory,
     SimCliPromptBuilder,
-    process_registry,
     simgraph_cli_harness_hook,
 )
+import sim_cli_plugin.eval_setup  # noqa: F401 — side-effect: registers hooks
 
 
 def make_app(script):
@@ -37,20 +41,11 @@ def make_app(script):
     )
 
 
-def apply_setup(case):
-    """Honor case.setup keys that pre-seed plugin state."""
-    setup = case.setup or {}
-    process_registry.procs.clear()
-    for name in setup.get("pre_running", []):
-        process_registry.add(name, ["simgraph", "c"], pid=12345)
-
-
 CASES = load_cases(HERE / "evals")
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
 async def test_case(case):
-    apply_setup(case)
     script = script_from_case_expected(case)
     res = await EvalRunner(make_app(script)).run(case)
     assert res.passed, "\n".join(res.reasons) + f"\n  observed: {[o.name for o in res.observed_calls]}\n  text: {res.observed_text!r}"

@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agentkit.eval.case import EvalCase, ExpectedCall, match_args
+from agentkit.eval.setup import DEFAULT_REGISTRY, SetupRegistry
 from agentkit.plugin.app import App
 from agentkit.protocol.events import (
     AssistantTextEvent,
@@ -45,31 +46,37 @@ class CaseResult:
 
 
 class EvalRunner:
-    def __init__(self, app: App):
+    def __init__(self, app: App, setup_registry: SetupRegistry | None = None):
         self.app = app
+        self.setup_registry = setup_registry or DEFAULT_REGISTRY
 
     async def run(self, case: EvalCase) -> CaseResult:
+        # Apply registered setup hooks for keys present in case.setup.
+        # Plugins register these once at import time via @setup_hook("key").
+        applied = await self.setup_registry.apply(case.setup or {}, self.app.context)
+
         thread = self.app.open_thread()
-        # Hand off setup payload to the host via thread.metadata['eval_setup'].
-        # Plugins that want to honor pre-seeded state read from there.
         thread.metadata["eval_setup"] = case.setup
 
         observed: list[ObservedCall] = []
         text_parts: list[str] = []
         call_id_to_obs: dict[str, ObservedCall] = {}
 
-        async for event in self.app.turn(thread, case.user_input):
-            if isinstance(event, AssistantTextEvent):
-                text_parts.append(event.delta)
-            elif isinstance(event, ToolCallEvent):
-                obs = ObservedCall(name=event.name, arguments=event.arguments)
-                observed.append(obs)
-                call_id_to_obs[event.call_id] = obs
-            elif isinstance(event, ToolResultEvent):
-                obs = call_id_to_obs.get(event.call_id)
-                if obs is not None:
-                    obs.result = event.result
-                    obs.error = event.error
+        try:
+            async for event in self.app.turn(thread, case.user_input):
+                if isinstance(event, AssistantTextEvent):
+                    text_parts.append(event.delta)
+                elif isinstance(event, ToolCallEvent):
+                    obs = ObservedCall(name=event.name, arguments=event.arguments)
+                    observed.append(obs)
+                    call_id_to_obs[event.call_id] = obs
+                elif isinstance(event, ToolResultEvent):
+                    obs = call_id_to_obs.get(event.call_id)
+                    if obs is not None:
+                        obs.result = event.result
+                        obs.error = event.error
+        finally:
+            await self.setup_registry.teardown(applied, self.app.context)
 
         observed_text = "".join(text_parts)
         passed, reasons = self._evaluate(case, observed, observed_text)
